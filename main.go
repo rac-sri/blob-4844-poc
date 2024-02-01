@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
+	"net/http"
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -32,6 +36,27 @@ type BlobTx struct {
 	SignatureValues      [3][]byte
 }
 
+type Payload struct {
+	ChainID              *big.Int
+	Nonce                uint64
+	MaxPriorityFeePerGas *big.Int
+	MaxFeePerGas         *big.Int
+	GasLimit             uint64
+	To                   common.Address
+	Value                *big.Int
+	Data                 []byte
+	AccessList           types.AccessList
+	MaxFeePerBlobGas     *big.Int
+	BlobVersionedHashes  [][]byte
+}
+
+type JSONRPCRequest struct {
+	JSONRPC string        `json:"jsonrpc"`
+	Method  string        `json:"method"`
+	Params  []interface{} `json:"params"`
+	ID      int           `json:"id"`
+}
+
 func main() {
 
 	err := godotenv.Load()
@@ -45,8 +70,8 @@ func main() {
 		MaxPriorityFeePerGas: big.NewInt(1000000000),
 		MaxFeePerGas:         big.NewInt(1000000000),
 		GasLimit:             21000,
-		To:                   common.HexToAddress("0xReceiverAddress"),
-		Value:                big.NewInt(10000000000000000), // 0.01 eth
+		To:                   common.HexToAddress("0x06fd9d0Ae9052A85989D0A30c60fB11753537f9A"),
+		Value:                big.NewInt(1000000000000000), // 0.001 eth
 		Data:                 []byte{},
 		AccessList:           types.AccessList{},
 		MaxFeePerBlobGas:     big.NewInt(1000000),
@@ -54,7 +79,25 @@ func main() {
 		SignatureValues:      [3][]byte{},
 	}
 
-	encodedTx, err := rlp.EncodeToBytes(&tx)
+	txEncode := Payload{
+		ChainID:              big.NewInt(5), // goerli
+		Nonce:                0,
+		MaxPriorityFeePerGas: big.NewInt(1000000000),
+		MaxFeePerGas:         big.NewInt(1000000000),
+		GasLimit:             21000,
+		To:                   common.HexToAddress("0x06fd9d0Ae9052A85989D0A30c60fB11753537f9A"),
+		Value:                big.NewInt(1000000000000000), // 0.001 eth
+		Data:                 []byte{},
+		AccessList:           types.AccessList{},
+		MaxFeePerBlobGas:     big.NewInt(1000000),
+		BlobVersionedHashes:  generateRandomHashes(3),
+	}
+
+	encodedTx, err := rlp.EncodeToBytes(&txEncode)
+
+	hexEncodedTx2 := hex.EncodeToString(encodedTx)
+
+	fmt.Println(hexEncodedTx2)
 
 	if err != nil {
 		fmt.Println("error encoding transactions", err)
@@ -70,7 +113,18 @@ func main() {
 
 	generateAndAppendSignatureValues(&tx, &encodedTx, privateKey)
 
-	fmt.Printf("Encoded Blob transactions: %x \n", encodedTx)
+	encodedTxWithSignature, err := rlp.EncodeToBytes(&tx)
+	hexEncodedTx := hex.EncodeToString(encodedTxWithSignature)
+
+	fmt.Println(hexEncodedTx)
+
+	if err != nil {
+		fmt.Println("Error re-encoding transaction with signature:", err)
+		return
+	}
+
+	createAndSendTransaction(encodedTxWithSignature)
+
 }
 
 func getECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
@@ -116,4 +170,43 @@ func generateRandomHashes(n int) [][]byte {
 		hashes[i] = hash
 	}
 	return hashes
+}
+
+func createAndSendTransaction(encodedTxWithSignature []byte) {
+	requestPayload := JSONRPCRequest{
+		JSONRPC: "2.0",
+		Method:  "eth_sendRawTransaction",
+		Params:  []interface{}{fmt.Sprintf("0x%x", encodedTxWithSignature)},
+		ID:      1,
+	}
+
+	requestBody, err := json.Marshal(requestPayload)
+	if err != nil {
+		fmt.Println("Error marshaling request:", err)
+		return
+	}
+
+	req, err := http.NewRequest("POST", os.Getenv("NODE_URL"), bytes.NewBuffer(requestBody))
+	if err != nil {
+		fmt.Println("Error creating request:", err)
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		fmt.Println("Error sending request:", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		fmt.Println("Error reading response body:", err)
+		return
+	}
+
+	fmt.Printf("Response: %s\n", responseBody)
 }
