@@ -109,8 +109,8 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *bi
 		Gas:        250000,
 		To:         common.HexToAddress(TO_ADDRESS),
 		Value:      uint256.NewInt(0),
-		Data:       make([]byte, 50),
-		BlobFeeCap: uint256.NewInt(15),
+		Data:       make([]byte, 128),
+		BlobFeeCap: uint256.NewInt(100),
 		BlobHashes: sidecar.BlobHashes(),
 		Sidecar:    &sidecar,
 	}), nil
