@@ -10,7 +10,6 @@ import (
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
@@ -18,6 +17,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/joho/godotenv"
 )
+
+const TO_ADDRESS = "0xF5106D4ef61cd0a04a345495f59f536bB7cd6074"
 
 func main() {
 	if err := loadEnv(); err != nil {
@@ -83,9 +84,11 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 	maxFeePerGas := new(big.Int).Add(baseFee, tip)
 	maxFeePerGas.Add(maxFeePerGas, big.NewInt(10e9))
 
-	chainId := big.NewInt(5)
-
-	return nonce, chainId, tip, maxFeePerGas, nil
+	chainID, err := client.NetworkID(context.Background())
+	if err != nil {
+		return 0, nil, nil, nil, fmt.Errorf("error fetching chain id %v", err)
+	}
+	return nonce, chainID, tip, maxFeePerGas, nil
 }
 
 func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *big.Int) (*types.Transaction, error) {
@@ -103,8 +106,8 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *bi
 		Nonce:      nonce,
 		GasTipCap:  uint256.MustFromBig(tip),
 		GasFeeCap:  uint256.MustFromBig(maxFeePerGas),
-		Gas:        25000000,
-		To:         common.HexToAddress("0xF5106D4ef61cd0a04a345495f59f536bB7cd6074"),
+		Gas:        250000,
+		To:         common.HexToAddress(TO_ADDRESS),
 		Value:      uint256.NewInt(0),
 		Data:       make([]byte, 50),
 		BlobFeeCap: uint256.NewInt(15),
@@ -119,12 +122,7 @@ func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey
 		log.Fatalf("Error signing transaction: %v", err)
 	}
 
-	rlpData, err := signedTx.MarshalBinary()
-	if err != nil {
-		log.Fatalf("Error marshaling signed transaction: %v", err)
-	}
-
-	err = client.Client().CallContext(context.Background(), nil, "eth_sendRawTransaction", hexutil.Encode(rlpData))
+	err = client.SendTransaction(context.Background(), signedTx)
 	if err != nil {
 		log.Fatalf("Failed to send transaction: %v", err)
 	} else {
