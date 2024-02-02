@@ -1,54 +1,24 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"crypto/ecdsa"
-	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/big"
-	"net/http"
 	"os"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/crypto/kzg4844"
+	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/holiman/uint256"
 	"github.com/joho/godotenv"
 )
-
-// specifications -> https://eips.ethereum.org/EIPS/eip-4844
-type BlobTx struct {
-	ChainID              *big.Int
-	Nonce                uint64
-	MaxPriorityFeePerGas *big.Int
-	MaxFeePerGas         *big.Int
-	GasLimit             uint64
-	To                   common.Address
-	Value                *big.Int
-	Data                 []byte
-	AccessList           types.AccessList
-	MaxFeePerBlobGas     *big.Int
-	BlobVersionedHashes  [][]byte
-	SignatureValues      [3][]byte
-}
-
-type Payload struct {
-	ChainID              *big.Int
-	Nonce                uint64
-	MaxPriorityFeePerGas *big.Int
-	MaxFeePerGas         *big.Int
-	GasLimit             uint64
-	To                   common.Address
-	Value                *big.Int
-	Data                 []byte
-	AccessList           types.AccessList
-	MaxFeePerBlobGas     *big.Int
-	BlobVersionedHashes  [][]byte
-}
 
 type JSONRPCRequest struct {
 	JSONRPC string        `json:"jsonrpc"`
@@ -57,6 +27,14 @@ type JSONRPCRequest struct {
 	ID      int           `json:"id"`
 }
 
+// specifications -> https://eips.ethereum.org/EIPS/eip-4844
+
+var (
+	emptyBlob          = kzg4844.Blob{}
+	emptyBlobCommit, _ = kzg4844.BlobToCommitment(emptyBlob)
+	emptyBlobProof, _  = kzg4844.ComputeBlobProof(emptyBlob, emptyBlobCommit)
+)
+
 func main() {
 
 	err := godotenv.Load()
@@ -64,66 +42,51 @@ func main() {
 		log.Fatal("Error loading .env file")
 	}
 
-	tx := BlobTx{
-		ChainID:              big.NewInt(5), // goerli
-		Nonce:                0,
-		MaxPriorityFeePerGas: big.NewInt(1000000000),
-		MaxFeePerGas:         big.NewInt(1000000000),
-		GasLimit:             21000,
-		To:                   common.HexToAddress("0x06fd9d0Ae9052A85989D0A30c60fB11753537f9A"),
-		Value:                big.NewInt(1000000000000000), // 0.001 eth
-		Data:                 []byte{},
-		AccessList:           types.AccessList{},
-		MaxFeePerBlobGas:     big.NewInt(1000000),
-		BlobVersionedHashes:  generateRandomHashes(3),
-		SignatureValues:      [3][]byte{},
+	// https://github.com/ethereum/go-ethereum/blob/master/core/types/tx_blob.go
+	sidecar := types.BlobTxSidecar{
+		Blobs:       []kzg4844.Blob{emptyBlob},
+		Commitments: []kzg4844.Commitment{emptyBlobCommit},
+		Proofs:      []kzg4844.Proof{emptyBlobProof},
 	}
 
-	txEncode := Payload{
-		ChainID:              big.NewInt(5), // goerli
-		Nonce:                0,
-		MaxPriorityFeePerGas: big.NewInt(1000000000),
-		MaxFeePerGas:         big.NewInt(1000000000),
-		GasLimit:             21000,
-		To:                   common.HexToAddress("0x06fd9d0Ae9052A85989D0A30c60fB11753537f9A"),
-		Value:                big.NewInt(1000000000000000), // 0.001 eth
-		Data:                 []byte{},
-		AccessList:           types.AccessList{},
-		MaxFeePerBlobGas:     big.NewInt(1000000),
-		BlobVersionedHashes:  generateRandomHashes(3),
-	}
+	chainId := uint256.MustFromBig(big.NewInt(5))
 
-	encodedTx, err := rlp.EncodeToBytes(&txEncode)
-
-	hexEncodedTx2 := hex.EncodeToString(encodedTx)
-
-	fmt.Println(hexEncodedTx2)
-
-	if err != nil {
-		fmt.Println("error encoding transactions", err)
-		return
-	}
+	blobtx := types.NewTx(&types.BlobTx{
+		ChainID:    chainId,
+		Nonce:      5,
+		GasTipCap:  uint256.NewInt(2),
+		GasFeeCap:  uint256.NewInt(2),
+		Gas:        25000,
+		To:         common.HexToAddress("0x06fd9d0Ae9052A85989D0A30c60fB11753537f9A"),
+		Value:      uint256.NewInt(99),
+		Data:       make([]byte, 50),
+		BlobFeeCap: uint256.NewInt(15),
+		BlobHashes: sidecar.BlobHashes(),
+	})
 
 	privateKey, err := getECDSAPrivateKey()
 
-	if err != nil {
-		fmt.Println("error parsing private key", err)
-		return
-	}
-
-	generateAndAppendSignatureValues(&tx, &encodedTx, privateKey)
-
-	encodedTxWithSignature, err := rlp.EncodeToBytes(&tx)
-	hexEncodedTx := hex.EncodeToString(encodedTxWithSignature)
-
-	fmt.Println(hexEncodedTx)
+	signedTx, _ := types.SignTx(blobtx, types.NewCancunSigner(big.NewInt(5)), privateKey)
 
 	if err != nil {
-		fmt.Println("Error re-encoding transaction with signature:", err)
-		return
+		fmt.Printf("error doing RLP encoding")
 	}
 
-	createAndSendTransaction(encodedTxWithSignature)
+	rlpData, _ := signedTx.MarshalBinary()
+
+	ctx := context.Background()
+	client, err := ethclient.DialContext(ctx, os.Getenv("NODE_URL"))
+	if err != nil {
+		log.Fatalf("Failed to connect to the Ethereum client: %v", err)
+	}
+
+	err = client.Client().CallContext(context.Background(), nil, "eth_sendRawTransaction", hexutil.Encode(rlpData))
+
+	if err != nil {
+		log.Fatalf("failed to send transaction: %v", err)
+	} else {
+		log.Printf("successfully sent transaction. txhash=%v", signedTx.Hash())
+	}
 
 }
 
@@ -143,70 +106,81 @@ func getECDSAPrivateKey() (*ecdsa.PrivateKey, error) {
 	return privateKey, nil
 }
 
-func generateAndAppendSignatureValues(tx *BlobTx, encodedTx *[]byte, privateKey *ecdsa.PrivateKey) {
-	signature, err := crypto.Sign(crypto.Keccak256Hash(*encodedTx).Bytes(), privateKey)
-	if err != nil {
-		fmt.Println("error singing the encoded tx object")
-		return
-	}
+// func generateAndAppendSignatureValues(tx *types.BlobTx, encodedTx *[]byte, privateKey *ecdsa.PrivateKey) {
+// 	signature, err := crypto.Sign(crypto.Keccak256Hash(*encodedTx).Bytes(), privateKey)
+// 	if err != nil {
+// 		fmt.Println("error singing the encoded tx object")
+// 		return
+// 	}
 
-	r := big.NewInt(0).SetBytes(signature[:32])
-	s := big.NewInt(0).SetBytes(signature[32:64])
-	v := big.NewInt(0).SetBytes([]byte{signature[64] + 27})
+// 	r, overflow := uint256.FromBig(new(big.Int).SetBytes(signature[:32]))
+// 	if overflow {
+// 		return
+// 	}
 
-	tx.SignatureValues[0] = v.Bytes()
-	tx.SignatureValues[1] = r.Bytes()
-	tx.SignatureValues[2] = s.Bytes()
-}
+// 	s, overflow := uint256.FromBig(new(big.Int).SetBytes(signature[32:64]))
+// 	if overflow {
+// 		return
+// 	}
 
-func generateRandomHashes(n int) [][]byte {
-	hashes := make([][]byte, n)
-	for i := 0; i < n; i++ {
-		hash := make([]byte, 32)
-		_, err := rand.Read(hash)
-		if err != nil {
-			panic("error generating random hash")
-		}
-		hashes[i] = hash
-	}
-	return hashes
-}
+// 	vByte := signature[64]
+// 	if vByte == 0 || vByte == 1 {
+// 		vByte += 27 // Adjust according to Ethereum's v value conventions
+// 	}
+// 	v := uint256.NewInt(uint64(vByte))
 
-func createAndSendTransaction(encodedTxWithSignature []byte) {
-	requestPayload := JSONRPCRequest{
-		JSONRPC: "2.0",
-		Method:  "eth_sendRawTransaction",
-		Params:  []interface{}{fmt.Sprintf("0x%x", encodedTxWithSignature)},
-		ID:      1,
-	}
+// 	tx.Value = v
+// 	tx.R = r
+// 	tx.S = s
+// }
 
-	requestBody, err := json.Marshal(requestPayload)
-	if err != nil {
-		fmt.Println("Error marshaling request:", err)
-		return
-	}
+// func generateRandomHashes(n int) [][]byte {
+// 	hashes := make([][]byte, n)
+// 	for i := 0; i < n; i++ {
+// 		hash := make([]byte, 32)
+// 		_, err := rand.Read(hash)
+// 		if err != nil {
+// 			panic("error generating random hash")
+// 		}
+// 		hashes[i] = hash
+// 	}
+// 	return hashes
+// }
 
-	req, err := http.NewRequest("POST", os.Getenv("NODE_URL"), bytes.NewBuffer(requestBody))
-	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return
-	}
+// func createAndSendTransaction(txHex string) {
+// 	payload := map[string]interface{}{
+// 		"jsonrpc": "2.0",
+// 		"method":  "eth_sendRawTransaction",
+// 		"params":  []interface{}{txHex},
+// 		"id":      5,
+// 	}
+// 	requestBody, err := json.Marshal(payload)
+// 	if err != nil {
+// 		fmt.Println("Error marshaling request:", err)
+// 		return
+// 	}
 
-	req.Header.Set("Content-Type", "application/json")
+// 	req, err := http.NewRequest("POST", os.Getenv("NODE_URL"), bytes.NewBuffer(requestBody))
+// 	if err != nil {
+// 		fmt.Println("Error creating request:", err)
+// 		return
+// 	}
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Println("Error sending request:", err)
-		return
-	}
-	defer resp.Body.Close()
+// 	req.Header.Set("Content-Type", "application/json")
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Println("Error reading response body:", err)
-		return
-	}
+// 	client := &http.Client{}
+// 	resp, err := client.Do(req)
+// 	if err != nil {
+// 		fmt.Println("Error sending request:", err)
+// 		return
+// 	}
+// 	defer resp.Body.Close()
 
-	fmt.Printf("Response: %s\n", responseBody)
-}
+// 	responseBody, err := io.ReadAll(resp.Body)
+// 	if err != nil {
+// 		fmt.Println("Error reading response body:", err)
+// 		return
+// 	}
+
+// 	fmt.Printf("Response: %s\n", responseBody)
+// }
