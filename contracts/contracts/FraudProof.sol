@@ -51,7 +51,7 @@ contract FraudProof is Storage {
     }
 
     function raiseDispute(uint256 requestId) external {
-        RequestReciept storage receipt = matrix[requestId];
+        RequestReceipt storage receipt = matrix[requestId];
 
         require(block.timestamp <= receipt.timestamp + CHALLENGE_PERIOD, "Challenge period has expired");
 
@@ -59,9 +59,9 @@ contract FraudProof is Storage {
 
         bytes32 generatedRoot = merkleTreeRoot(result);
 
-        require(generatedRoot != receipt.root, "Dispute raise denied: Correct computation");
+        require(generatedRoot != receipt.root, "No discrepancy found; computation correct");
 
-        operators[receipt.solver].penalities += 1;
+        operators[receipt.solver].penalties += 1;
         operators[msg.sender].successfulDisputes += 1;
 
         receipt.matrixMul = correctMatrix;

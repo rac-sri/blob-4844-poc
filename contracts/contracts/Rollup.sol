@@ -18,7 +18,7 @@ contract Rollup is FraudProof {
 
    function submitResult(bytes32 root, uint256[3][3] memory results, uint256 requestId) onlyOperator external {
         // TODO: input validations
-        RequestReciept storage reciept = matrix[requestId];
+        RequestReceipt storage reciept = matrix[requestId];
         reciept.matrixMul = results;
         reciept.timestamp = block.timestamp;
         reciept.root = root;

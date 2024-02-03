@@ -3,7 +3,7 @@
 pragma solidity ^0.8.10;
 
 contract Storage {
-     struct RequestReciept {
+     struct RequestReceipt {
         uint256[3][3] matrix1;
         uint256[3][3] matrix2;
         uint256[3][3] matrixMul;
@@ -14,7 +14,7 @@ contract Storage {
 
     struct Operator {
         uint256 stake;
-        uint256 penalities;
+        uint256 penalties;
         uint256 successfulDisputes;
     }
 
@@ -24,5 +24,5 @@ contract Storage {
     // - proof submitter ( requires prior registration )
     // - dispute raise
     mapping(address => Operator) public operators;
-    mapping(uint256 => RequestReciept) matrix;
+    mapping(uint256 => RequestReceipt) matrix;
 }
