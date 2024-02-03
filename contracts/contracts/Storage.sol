@@ -8,8 +8,8 @@ contract Storage {
         uint256[3][3] matrix2;
         uint256[3][3] matrixMul;
         address solver;
-        uint256 timestamp;
         bytes32 root;
+        uint256 timestamp;
     }
 
     struct Operator {
@@ -19,6 +19,7 @@ contract Storage {
     }
 
 	uint256 public constant CHALLENGE_PERIOD = 7 days;
+    uint256 receiptCounter;
 
     // in the context of the whole code, operators can be:
     // - proof submitter ( requires prior registration )

@@ -3,8 +3,9 @@
 pragma solidity ^0.8.10;
 
 import "./Storage.sol";
+import "./Logger.sol";
 
-contract FraudProof is Storage {
+contract FraudProof is Storage, Logger {
     function hashUint256(uint256 data) private pure returns (bytes32) {
         return keccak256(abi.encodePacked(data));
     }
@@ -66,5 +67,7 @@ contract FraudProof is Storage {
 
         receipt.matrixMul = correctMatrix;
         receipt.root = generatedRoot; 
+
+        emit DisputeRaised(msg.sender, requestId);
     }
 }
