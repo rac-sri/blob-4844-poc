@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/crypto/kzg4844"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/holiman/uint256"
 	"github.com/joho/godotenv"
 )
@@ -60,7 +61,7 @@ func getECDSAPrivateKey(privateKeyHex string) (*ecdsa.PrivateKey, error) {
 	return crypto.ToECDSA(privateKeyBytes)
 }
 
-func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.PrivateKey) (uint64, *big.Int, *big.Int, *big.Int, error) {
+func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.PrivateKey) (uint64, *big.Int, *big.Int, *uint256.Int, error) {
 	publicKey := privateKey.PublicKey
 	fromAddress := crypto.PubkeyToAddress(publicKey)
 
@@ -69,20 +70,22 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 		return 0, nil, nil, nil, fmt.Errorf("error getting nonce: %v", err)
 	}
 
-	head, err := client.HeaderByNumber(context.Background(), nil)
-	if err != nil {
-		return 0, nil, nil, nil, fmt.Errorf("error getting header: %v", err)
-	}
-
-	baseFee := head.BaseFee
 	suggestedTip, err := client.SuggestGasTipCap(context.Background())
 	if err != nil {
 		return 0, nil, nil, nil, fmt.Errorf("error suggesting gas tip cap: %v", err)
 	}
 
 	tip := new(big.Int).Add(suggestedTip, big.NewInt(10e9))
-	maxFeePerGas := new(big.Int).Add(baseFee, tip)
-	maxFeePerGas.Add(maxFeePerGas, big.NewInt(10e9))
+
+	val, err := client.SuggestGasPrice(context.Background())
+	if err != nil {
+		log.Fatalf("Error getting suggested gas price: %v", err)
+	}
+	var nok bool
+	maxFeePerGas, nok := uint256.FromBig(val)
+	if nok {
+		log.Fatalf("gas price is too high! got %v", val.String())
+	}
 
 	chainID, err := client.NetworkID(context.Background())
 	if err != nil {
@@ -91,7 +94,7 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 	return nonce, chainID, tip, maxFeePerGas, nil
 }
 
-func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *big.Int) (*types.Transaction, error) {
+func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *uint256.Int) (*types.Transaction, error) {
 	emptyBlob := kzg4844.Blob{}
 	emptyBlobCommit, _ := kzg4844.BlobToCommitment(emptyBlob)
 	emptyBlobProof, _ := kzg4844.ComputeBlobProof(emptyBlob, emptyBlobCommit)
@@ -105,18 +108,28 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *bi
 		ChainID:    uint256.MustFromBig(chainID),
 		Nonce:      nonce,
 		GasTipCap:  uint256.MustFromBig(tip),
-		GasFeeCap:  uint256.MustFromBig(maxFeePerGas),
+		GasFeeCap:  maxFeePerGas,
 		Gas:        250000,
 		To:         common.HexToAddress(TO_ADDRESS),
 		Value:      uint256.NewInt(0),
 		Data:       make([]byte, 128),
-		BlobFeeCap: uint256.NewInt(100),
+		BlobFeeCap: uint256.NewInt(1e10),
 		BlobHashes: sidecar.BlobHashes(),
 		Sidecar:    &sidecar,
 	}), nil
 }
 
 func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey *ecdsa.PrivateKey) {
+	log.Printf("Transaction before signing: %+v", tx)
+	fmt.Println("blob gas ", tx.BlobGas())
+	fmt.Println("blob gas fee cap ", tx.BlobGasFeeCap())
+	fmt.Println("blob hashes ", tx.BlobHashes())
+	//fmt.Println("blob tx sidecar", tx.BlobTxSidecar())
+	fmt.Println("cost", tx.Cost())
+	fmt.Println("gas tip cap", tx.GasTipCap())
+	fmt.Println("gas", tx.Gas())
+	fmt.Println("gas price", tx.GasPrice())
+
 	signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
 	if err != nil {
 		log.Fatalf("Error signing transaction: %v", err)
@@ -128,4 +141,24 @@ func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey
 	} else {
 		log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
 	}
+}
+
+func encodeBlobs(data []byte) []kzg4844.Blob {
+	blobs := []kzg4844.Blob{{}}
+	blobIndex := 0
+	fieldIndex := -1
+	for i := 0; i < len(data); i += 31 {
+		fieldIndex++
+		if fieldIndex == params.BlobTxFieldElementsPerBlob {
+			blobs = append(blobs, kzg4844.Blob{})
+			blobIndex++
+			fieldIndex = 0
+		}
+		max := i + 31
+		if max > len(data) {
+			max = len(data)
+		}
+		copy(blobs[blobIndex][fieldIndex*32:], data[i:max])
+	}
+	return blobs
 }

@@ -10,7 +10,7 @@ func hashData(data []byte) []byte {
 	return crypto.Keccak256(data)
 }
 
-func merkleTreeRoot(values []*big.Int) []byte {
+func MerkleTreeRoot(values []*big.Int) []byte {
 	var nodes [][]byte
 
 	for _, value := range values {

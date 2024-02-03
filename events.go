@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/ethereum/go-ethereum"
@@ -14,13 +16,26 @@ import (
 )
 
 var contractAddress = "0x"
-var contractABI = `[CONTRACTABI]`
 
 func CheckLatestEvents(client *ethclient.Client) {
+	abiPath := "./contracts/artifacts/contracts/Rollup.sol/Rollup.json"
+	file, err := os.Open(abiPath)
+	if err != nil {
+		fmt.Println("Error opening ABI file:", err)
+		return
+	}
+	defer file.Close()
+
 	address := common.HexToAddress(contractAddress)
 
+	abiBytes, err := io.ReadAll(file)
+	if err != nil {
+		fmt.Println("Error reading ABI file:", err)
+		return
+	}
+
 	// Load the contract ABI
-	parsedABI, err := abi.JSON(strings.NewReader(contractABI))
+	parsedABI, err := abi.JSON(strings.NewReader(string(abiBytes)))
 	if err != nil {
 		log.Fatalf("Failed to parse contract ABI: %v", err)
 	}
