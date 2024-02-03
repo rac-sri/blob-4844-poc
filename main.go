@@ -129,18 +129,20 @@ func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey
 	fmt.Println("gas tip cap", tx.GasTipCap())
 	fmt.Println("gas", tx.Gas())
 	fmt.Println("gas price", tx.GasPrice())
+	fmt.Println("type", tx.Type())
 
-	signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
-	if err != nil {
-		log.Fatalf("Error signing transaction: %v", err)
-	}
+	// signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
+	// fmt.Println("signed tx", signedTx)
+	// if err != nil {
+	// 	log.Fatalf("Error signing transaction: %v", err)
+	// }
 
-	err = client.SendTransaction(context.Background(), signedTx)
-	if err != nil {
-		log.Fatalf("Failed to send transaction: %v", err)
-	} else {
-		log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
-	}
+	// err = client.SendTransaction(context.Background(), signedTx)
+	// if err != nil {
+	// 	log.Fatalf("Failed to send transaction: %v", err)
+	// } else {
+	// 	log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
+	// }
 }
 
 func encodeBlobs(data []byte) []kzg4844.Blob {
