@@ -26,20 +26,15 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 		return 0, nil, nil, nil, fmt.Errorf("error getting nonce: %v", err)
 	}
 
-	// SuggestGasTipCap returns a suggested tip cap.
 	suggestedTip, err := client.SuggestGasTipCap(context.Background())
 	if err != nil {
 		return 0, nil, nil, nil, fmt.Errorf("error suggesting gas tip cap: %v", err)
 	}
-
-	// Fetch the latest block to get the base fee
 	header, err := client.HeaderByNumber(context.Background(), nil) // nil for latest block
 	if err != nil {
 		return 0, nil, nil, nil, fmt.Errorf("error fetching latest block header: %v", err)
 	}
 
-	// Calculate maxFeePerGas as the sum of the base fee from the latest block plus a margin (e.g., the suggested tip).
-	// This provides a buffer ensuring the transaction can cover the base fee plus provides a priority fee (miner tip).
 	maxFeePerGas := new(big.Int).Add(header.BaseFee, suggestedTip)
 
 	chainID, err := client.NetworkID(context.Background())
@@ -61,7 +56,7 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *ui
 		Commitments: commits,
 		Proofs:      proofs,
 	}
-	fmt.Println("working")
+
 	return types.NewTx(&types.BlobTx{
 		ChainID:    uint256.MustFromBig(chainID),
 		Nonce:      nonce,
@@ -106,10 +101,9 @@ func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.P
 	)
 
 	for _, blob := range blobs {
-		fmt.Println(len(blob))
+
 		commit, err := kzg4844.BlobToCommitment(blob)
-		fmt.Println("fsdklnfs")
-		fmt.Println(err)
+
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
