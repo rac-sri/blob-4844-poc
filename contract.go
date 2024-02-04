@@ -31,7 +31,7 @@ func CheckLatestRequestId(client *ethclient.Client) (*big.Int, error) {
 	}
 
 	logs, err := client.FilterLogs(context.Background(), query)
-	fmt.Println("logs", err, logs)
+
 	if err != nil {
 		return nil, fmt.Errorf("error fetching logs: %v", err)
 	}
@@ -84,8 +84,15 @@ func generateSubmitSolutionCalldata(root []byte, matrixMul [3][3]*big.Int, reque
 		log.Fatal("cannot parse abi")
 	}
 
-	input, err := parsedABI.Pack("submitResult", root, matrixMul, requestId)
+	var root32 [32]byte
+	copy(root32[:], root) // Assuming 'root' is a slice of exactly 32 bytes
 
+	input, err := parsedABI.Pack("submitResult", root32, matrixMul, requestId)
+
+	if err != nil {
+		fmt.Println("here")
+		log.Fatal(err)
+	}
 	return input
 }
 

@@ -60,11 +60,9 @@ func main() {
 	singletonArray := [9]*big.Int{big.NewInt(1), big.NewInt(2), big.NewInt(3), big.NewInt(4), big.NewInt(5), big.NewInt(6), big.NewInt(7), big.NewInt(8), big.NewInt(9)}
 	merkleRoot := MerkleTreeRoot(singletonArray[:])
 
-	blob := encodeBlob(merkleRoot)
-
 	input := generateSubmitSolutionCalldata(merkleRoot, matrixMul, requestId)
 
-	blobTx, err := createBlobTx(chainID, nonce, tip, maxFeePerGas, blob, input)
+	blobTx, err := createBlobTx(chainID, nonce, tip, maxFeePerGas, merkleRoot, input)
 	if err != nil {
 		log.Fatal("Failed to create blob transaction:", err)
 	}
@@ -96,16 +94,16 @@ func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey
 	fmt.Println("gas price", tx.GasPrice())
 	fmt.Println("type", tx.Type())
 
-	signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
-	fmt.Println("signed tx", signedTx)
-	if err != nil {
-		log.Fatalf("Error signing transaction: %v", err)
-	}
+	_, _ = types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
+	// fmt.Println("signed tx", signedTx)
+	// if err != nil {
+	// 	log.Fatalf("Error signing transaction: %v", err)
+	// }
 
-	err = client.SendTransaction(context.Background(), signedTx)
-	if err != nil {
-		log.Fatalf("Failed to send transaction: %v", err)
-	} else {
-		log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
-	}
+	// err = client.SendTransaction(context.Background(), signedTx)
+	// if err != nil {
+	// 	log.Fatalf("Failed to send transaction: %v", err)
+	// } else {
+	// 	log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
+	// }
 }

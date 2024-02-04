@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/sha256"
 	"fmt"
 	"log"
 	"math/big"
@@ -25,70 +26,115 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 		return 0, nil, nil, nil, fmt.Errorf("error getting nonce: %v", err)
 	}
 
+	// SuggestGasTipCap returns a suggested tip cap.
 	suggestedTip, err := client.SuggestGasTipCap(context.Background())
 	if err != nil {
 		return 0, nil, nil, nil, fmt.Errorf("error suggesting gas tip cap: %v", err)
 	}
 
-	tip := new(big.Int).Add(suggestedTip, big.NewInt(10e9))
-
-	val, err := client.SuggestGasPrice(context.Background())
+	// Fetch the latest block to get the base fee
+	header, err := client.HeaderByNumber(context.Background(), nil) // nil for latest block
 	if err != nil {
-		log.Fatalf("Error getting suggested gas price: %v", err)
+		return 0, nil, nil, nil, fmt.Errorf("error fetching latest block header: %v", err)
 	}
-	var nok bool
-	maxFeePerGas, nok := uint256.FromBig(val)
-	if nok {
-		log.Fatalf("gas price is too high! got %v", val.String())
-	}
+
+	// Calculate maxFeePerGas as the sum of the base fee from the latest block plus a margin (e.g., the suggested tip).
+	// This provides a buffer ensuring the transaction can cover the base fee plus provides a priority fee (miner tip).
+	maxFeePerGas := new(big.Int).Add(header.BaseFee, suggestedTip)
 
 	chainID, err := client.NetworkID(context.Background())
 	if err != nil {
-		return 0, nil, nil, nil, fmt.Errorf("error fetching chain id %v", err)
+		return 0, nil, nil, nil, fmt.Errorf("error fetching chain id: %v", err)
 	}
-	return nonce, chainID, tip, maxFeePerGas, nil
+
+	return nonce, chainID, suggestedTip, uint256.MustFromBig(maxFeePerGas), nil
 }
 
-func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *uint256.Int, blob kzg4844.Blob, input []byte) (*types.Transaction, error) {
-	blobCommit, _ := kzg4844.BlobToCommitment(blob)
-	blobProof, _ := kzg4844.ComputeBlobProof(blob, blobCommit)
-	sidecar := types.BlobTxSidecar{
-		Blobs:       []kzg4844.Blob{blob},
-		Commitments: []kzg4844.Commitment{blobCommit},
-		Proofs:      []kzg4844.Proof{blobProof},
-	}
+func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *uint256.Int, root []byte, input []byte) (*types.Transaction, error) {
+	blobs, commits, proofs, versionedHashed, err := EncodeBlobs(root)
 
+	if err != nil {
+		log.Fatal(err)
+	}
+	sidecar := types.BlobTxSidecar{
+		Blobs:       blobs,
+		Commitments: commits,
+		Proofs:      proofs,
+	}
+	fmt.Println("working")
 	return types.NewTx(&types.BlobTx{
 		ChainID:    uint256.MustFromBig(chainID),
 		Nonce:      nonce,
 		GasTipCap:  uint256.MustFromBig(tip),
 		GasFeeCap:  maxFeePerGas,
-		Gas:        250000,
+		Gas:        2500000,
 		To:         common.HexToAddress(TO_ADDRESS),
 		Value:      uint256.NewInt(0),
 		Data:       input,
-		BlobFeeCap: uint256.NewInt(1e10),
-		BlobHashes: sidecar.BlobHashes(),
+		BlobFeeCap: uint256.NewInt(1e7 * 786432),
+		BlobHashes: versionedHashed,
 		Sidecar:    &sidecar,
 	}), nil
 }
 
-func encodeBlob(data []byte) kzg4844.Blob {
-	blob := kzg4844.Blob{}
-	fieldIndex := 0
-
+func encodeBlobs(data []byte) []kzg4844.Blob {
+	blobs := []kzg4844.Blob{{}}
+	blobIndex := 0
+	fieldIndex := -1
 	for i := 0; i < len(data); i += 31 {
-		if fieldIndex >= params.BlobTxFieldElementsPerBlob {
-			panic("Data exceeds the capacity")
+		fieldIndex++
+		if fieldIndex == params.BlobTxFieldElementsPerBlob {
+			blobs = append(blobs, kzg4844.Blob{})
+			blobIndex++
+			fieldIndex = 0
 		}
-
 		max := i + 31
 		if max > len(data) {
 			max = len(data)
 		}
-
-		copy(blob[fieldIndex*32:], data[i:max])
-		fieldIndex++
+		copy(blobs[blobIndex][fieldIndex*32:], data[i:max])
 	}
-	return blob
+	return blobs
+}
+
+func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.Proof, []common.Hash, error) {
+	var (
+		blobs           = encodeBlobs(data)
+		commits         []kzg4844.Commitment
+		proofs          []kzg4844.Proof
+		versionedHashes []common.Hash
+	)
+
+	for _, blob := range blobs {
+		fmt.Println(len(blob))
+		commit, err := kzg4844.BlobToCommitment(blob)
+		fmt.Println("fsdklnfs")
+		fmt.Println(err)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+
+		commits = append(commits, commit)
+
+		proof, err := kzg4844.ComputeBlobProof(blob, commit)
+
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		proofs = append(proofs, proof)
+
+		versionedHashes = append(versionedHashes, kZGToVersionedHash(commit))
+
+	}
+	return blobs, commits, proofs, versionedHashes, nil
+}
+
+var blobCommitmentVersionKZG uint8 = 0x01
+
+// kZGToVersionedHash implements kzg_to_versioned_hash from EIP-4844
+func kZGToVersionedHash(kzg kzg4844.Commitment) common.Hash {
+	h := sha256.Sum256(kzg[:])
+	h[0] = blobCommitmentVersionKZG
+
+	return h
 }
