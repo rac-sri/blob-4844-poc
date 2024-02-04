@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
-	"crypto/sha256"
 	"fmt"
 	"log"
 	"math/big"
@@ -46,11 +45,12 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 }
 
 func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *uint256.Int, root []byte, input []byte) (*types.Transaction, error) {
-	blobs, commits, proofs, versionedHashed, err := EncodeBlobs(root)
+	blobs, commits, proofs, err := EncodeBlobs(root)
 
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	sidecar := types.BlobTxSidecar{
 		Blobs:       blobs,
 		Commitments: commits,
@@ -67,7 +67,7 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *ui
 		Value:      uint256.NewInt(0),
 		Data:       input,
 		BlobFeeCap: uint256.NewInt(1e7 * 786432),
-		BlobHashes: versionedHashed,
+		BlobHashes: sidecar.BlobHashes(),
 		Sidecar:    &sidecar,
 	}), nil
 }
@@ -92,12 +92,11 @@ func encodeBlobs(data []byte) []kzg4844.Blob {
 	return blobs
 }
 
-func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.Proof, []common.Hash, error) {
+func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.Proof, error) {
 	var (
-		blobs           = encodeBlobs(data)
-		commits         []kzg4844.Commitment
-		proofs          []kzg4844.Proof
-		versionedHashes []common.Hash
+		blobs   []kzg4844.Blob
+		commits []kzg4844.Commitment
+		proofs  []kzg4844.Proof
 	)
 
 	for _, blob := range blobs {
@@ -105,7 +104,7 @@ func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.P
 		commit, err := kzg4844.BlobToCommitment(blob)
 
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		commits = append(commits, commit)
@@ -113,22 +112,10 @@ func EncodeBlobs(data []byte) ([]kzg4844.Blob, []kzg4844.Commitment, []kzg4844.P
 		proof, err := kzg4844.ComputeBlobProof(blob, commit)
 
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, err
 		}
 		proofs = append(proofs, proof)
 
-		versionedHashes = append(versionedHashes, kZGToVersionedHash(commit))
-
 	}
-	return blobs, commits, proofs, versionedHashes, nil
-}
-
-var blobCommitmentVersionKZG uint8 = 0x01
-
-// kZGToVersionedHash implements kzg_to_versioned_hash from EIP-4844
-func kZGToVersionedHash(kzg kzg4844.Commitment) common.Hash {
-	h := sha256.Sum256(kzg[:])
-	h[0] = blobCommitmentVersionKZG
-
-	return h
+	return blobs, commits, proofs, nil
 }
