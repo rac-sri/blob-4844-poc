@@ -35,4 +35,9 @@ contract Rollup is FraudProof {
         matrix[requestId] = receipt;
         emit ResultSubmitted(msg.sender, requestId, root);
    }
+
+   function getMatrices(uint256 receiptId) external view returns (uint256[3][3] memory, uint256[3][3] memory ) {
+    RequestReceipt memory receipt = matrix[receiptId];
+    return (receipt.matrix1, receipt.matrix2);
+   }
 }
