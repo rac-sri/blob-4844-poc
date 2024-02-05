@@ -83,27 +83,17 @@ func getECDSAPrivateKey(privateKeyHex string) (*ecdsa.PrivateKey, error) {
 }
 
 func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey *ecdsa.PrivateKey) {
-	log.Printf("Transaction before signing: %+v", tx)
-	fmt.Println("blob gas ", tx.BlobGas())
-	fmt.Println("blob gas fee cap ", tx.BlobGasFeeCap())
-	fmt.Println("blob hashes ", tx.BlobHashes())
-	//fmt.Println("blob tx sidecar", tx.BlobTxSidecar())
-	fmt.Println("cost", tx.Cost())
-	fmt.Println("gas tip cap", tx.GasTipCap())
-	fmt.Println("gas", tx.Gas())
-	fmt.Println("gas price", tx.GasPrice())
-	fmt.Println("type", tx.Type())
 
-	_, _ = types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
-	// fmt.Println("signed tx", signedTx)
-	// if err != nil {
-	// 	log.Fatalf("Error signing transaction: %v", err)
-	// }
+	signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
+	fmt.Println("signed tx", signedTx)
+	if err != nil {
+		log.Fatalf("Error signing transaction: %v", err)
+	}
 
-	// err = client.SendTransaction(context.Background(), signedTx)
-	// if err != nil {
-	// 	log.Fatalf("Failed to send transaction: %v", err)
-	// } else {
-	// 	log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
-	// }
+	err = client.SendTransaction(context.Background(), signedTx)
+	if err != nil {
+		log.Fatalf("Failed to send transaction: %v", err)
+	} else {
+		log.Printf("Successfully sent transaction. txhash= %s", signedTx.Hash().Hex())
+	}
 }

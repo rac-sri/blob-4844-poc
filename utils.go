@@ -45,16 +45,25 @@ func prepareTransactionParams(client *ethclient.Client, privateKey *ecdsa.Privat
 }
 
 func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *uint256.Int, root []byte, input []byte) (*types.Transaction, error) {
-	blobs, commits, proofs, err := EncodeBlobs(root)
+	// blobs, commits, proofs, err := EncodeBlobs(root)
 
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	emptyBlob := kzg4844.Blob{}
+	emptyBlobCommit, err := kzg4844.BlobToCommitment(emptyBlob)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal("Failed to create commitment", "err", err)
+	}
+	emptyBlobProof, err := kzg4844.ComputeBlobProof(emptyBlob, emptyBlobCommit)
+	if err != nil {
+		log.Fatal("Failed to create proof", "err", err)
 	}
 
 	sidecar := types.BlobTxSidecar{
-		Blobs:       blobs,
-		Commitments: commits,
-		Proofs:      proofs,
+		Blobs:       []kzg4844.Blob{emptyBlob},
+		Commitments: []kzg4844.Commitment{emptyBlobCommit},
+		Proofs:      []kzg4844.Proof{emptyBlobProof},
 	}
 
 	return types.NewTx(&types.BlobTx{
@@ -66,7 +75,7 @@ func createBlobTx(chainID *big.Int, nonce uint64, tip *big.Int, maxFeePerGas *ui
 		To:         common.HexToAddress(TO_ADDRESS),
 		Value:      uint256.NewInt(0),
 		Data:       input,
-		BlobFeeCap: uint256.NewInt(1e7 * 786432),
+		BlobFeeCap: uint256.NewInt(3e10),
 		BlobHashes: sidecar.BlobHashes(),
 		Sidecar:    &sidecar,
 	}), nil
