@@ -38,7 +38,7 @@ func main() {
 	}
 
 	requestId, err := CheckLatestRequestId(client)
-	fmt.Print(requestId, err)
+
 	if err != nil {
 		return
 	}
@@ -83,9 +83,8 @@ func getECDSAPrivateKey(privateKeyHex string) (*ecdsa.PrivateKey, error) {
 }
 
 func sendTransaction(client *ethclient.Client, tx *types.Transaction, privateKey *ecdsa.PrivateKey) {
-
 	signedTx, err := types.SignTx(tx, types.NewCancunSigner(tx.ChainId()), privateKey)
-	fmt.Println("signed tx", signedTx)
+
 	if err != nil {
 		log.Fatalf("Error signing transaction: %v", err)
 	}
